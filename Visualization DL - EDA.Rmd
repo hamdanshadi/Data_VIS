@@ -1,0 +1,490 @@
+---
+title: "Preliminary Data Analysis - Suncharge"
+author: "Joanna Paula Agustin"
+date: "2024-03-03"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+#data cleanup
+Purchases <- merge(Purchases, Vendors, by = "VendorKey")
+Purchases <- merge(Purchases, Plants, by = "PlantKey")
+Purchases <- merge(Purchases, Materials, by = "MaterialKey")
+Purchases <- merge(Purchases, MaterialPlantRelation, by = "MaterialPlantKey")
+
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(viridis)
+
+Purchases$PurchaseOrderMonthYear <- format(Purchases$PurchaseOrderCreationDate, "%Y-%m")
+Purchases$PurchaseOrderYear <- year(Purchases$PurchaseOrderCreationDate)
+Purchases$ReceiptDateVar <- as.numeric(difftime(Purchases$ActualGoodsReceiptDate, Purchases$PlannedGoodsReceiptDate, units = "days"))
+Purchases$ArrivalDateVar <- as.numeric(difftime(Purchases$ActualArrivalDateYard, Purchases$PlannedArrivalDateYard, units = "days"))
+Purchases$VendorShipmentDateVar <- as.numeric(difftime(Purchases$ActualVendorShipmentDate, Purchases$PlannedVendorShipmentDate, units = "days"))
+Purchases$OrderFulfillmentDays <- as.numeric(difftime(Purchases$ActualGoodsReceiptDate, Purchases$PurchaseOrderCreationDate, units = "days"))
+
+install.packages("openxlsx")
+Purchases_wp <- "C:\Users\cheche\Documents\UHasselt\Y2SEM2_DL\Visualization\Visualization DL\Purchases_wp.xlsx"
+write.xlsx(Purchases, file = Purchases_wp, rowNames = FALSE)
+
+par(mfrow = c(3, 2))
+# Plot the number of orders per month-year
+ggplot(Purchases, aes(x = PurchaseOrderMonthYear)) +
+  geom_bar(fill = "#8FBC8F") +
+  ggtitle("Number of Orders Created per Month-Year") +
+  xlab("Month-Year") +
+  ylab("Number of Orders Created") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(Purchases, aes(x = PurchaseOrderQuantity)) +
+  geom_histogram(binwidth = 10, fill = "#aea391", color = "white") +
+  ggtitle("Purchase Order Quantity") +
+  xlab("Purchase Order Quantity") +
+  ylab("Frequency") + labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggplot(Purchases, aes(x = ReceiptDateVar)) +
+  geom_histogram(binwidth = 1, fill = "#d1acaa", color = "white") +
+  ggtitle("Difference of Actual Goods Receipt Date vs Planned") +
+  xlab("Receipt Date Variance (Days)") +
+  ylab("Frequency")+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggplot(Purchases, aes(x = ArrivalDateVar)) +
+  geom_histogram(binwidth = 1, fill = "#a96b5c", color = "white") +
+  ggtitle("Difference of Actual Arrival Date Yard vs Planned Arrival") +
+  xlab("Yard Arrival Date Variance (Days)") +
+  ylab("Frequency")+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggplot(Purchases, aes(x = VendorShipmentDateVar)) +
+  geom_histogram(binwidth = 1, fill = "#8FBC8F", color = "black") +
+  ggtitle("Difference of Actual Vendor Shipment Date vs Planned Shipment Date") +
+  xlab("Vendor Shipment Date Variance (Days)") +
+  ylab("Frequency")+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggplot(Purchases, aes(x = OrderFulfillmentDays)) +
+  geom_histogram(binwidth = 1, fill = "#aea391", color = "black") +
+  ggtitle("Difference of Actual Goods Receipt Date vs Purchase Order Creation Date") +
+  xlab("Date Variance (Days)") +
+  ylab("Frequency")+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+```
+
+
+
+```{r}
+library(dplyr)
+#vendorinfo
+order_counts <- Purchases %>%
+  group_by(VendorName) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = VendorName, y = Count)) +
+  geom_bar(stat = "identity", fill = "#d1acaa") +
+  ggtitle("Number of Purchase Orders by Vendor") +
+  xlab("Vendor Name") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(VendorTier) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = VendorTier, y = Count)) +
+  geom_bar(stat = "identity", fill = "#a96b5c") +
+  ggtitle("Number of Purchase Orders by Vendor Tier") +
+  xlab("Vendor Tier") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(VendorCity) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = VendorCity, y = Count)) +
+  geom_bar(stat = "identity", fill = "#8FBC8F") +
+  ggtitle("Number of Purchase Orders by Vendor City") +
+  xlab("Vendor City") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+```{r}
+#By Plants
+library(dplyr)
+
+order_counts <- Purchases %>%
+  group_by(Plant) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = Plant, y = Count)) +
+  geom_bar(stat = "identity", fill = "#aea391") +
+  ggtitle("Number of Purchase Orders by Plant") +
+  xlab("Plant") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(PlantType) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = PlantType, y = Count)) +
+  geom_bar(stat = "identity", fill = "#d1acaa") +
+  ggtitle("Number of Purchase Orders by Plant Type") +
+  xlab("Plant Type") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(PlantName) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = PlantName, y = Count)) +
+  geom_bar(stat = "identity", fill = "#a96b5c") +
+  ggtitle("Number of Purchase Orders by Plant/Distribution Center") +
+  xlab("Plant Name") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+```{r}
+#By Material
+library(dplyr)
+order_counts <- Purchases %>%
+  group_by(MaterialDescription) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = MaterialDescription, y = Count)) +
+  geom_bar(stat = "identity", fill = "#8FBC8F") +
+  ggtitle("Number of Purchase Orders by Material") +
+  xlab("Material") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(MaterialType) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = MaterialType, y = Count)) +
+  geom_bar(stat = "identity", fill = "#d1acaa") +
+  ggtitle("Number of Purchase Orders by Material Type") +
+  xlab("Material Type") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(`Product Category`) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = `Product Category`, y = Count)) +
+  geom_bar(stat = "identity", fill = "#d1acaa") +
+  ggtitle("Number of Purchase Orders by Product Category") +
+  xlab("Product Category") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(Component) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = Component, y = Count)) +
+  geom_bar(stat = "identity", fill = "#a96b5c") +
+  ggtitle("Number of Purchase Orders by Component") +
+  xlab("Component") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggplot(Purchases, aes(x = StandardCost)) +
+  geom_histogram(fill = "#8FBC8F", color = "white", bins = 5) +
+  ggtitle("Distribution of StandardCost") +
+  xlab("StandardCost") +
+  ylab("Frequency")+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+order_counts <- Purchases %>%
+  group_by(Currency) %>%
+  summarize(Count = n())
+
+# Plotting
+ggplot(order_counts, aes(x = Currency, y = Count)) +
+  geom_bar(stat = "identity", fill = "#aea391") +
+  ggtitle("Number of Purchase Orders by Currency") +
+  xlab("Currency") +
+  ylab("Number of Purchase Orders") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggplot(Purchases, aes(x = ProductionTime)) +
+  geom_histogram(fill = "#d1acaa", color = "white", bins = 1) +
+  ggtitle("Distribution of Production Time") +
+  xlab("Production Time") +
+  ylab("Frequency") +
+  theme_minimal()+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+# Histogram for InboundTransportationTime
+ggplot(Purchases, aes(x = InboundTransportationTime)) +
+  geom_histogram(fill = "#a96b5c", color = "white", bins = 3) +
+  ggtitle("Distribution of Inbound Transportation Time") +
+  xlab("Inbound Transportation Time") +
+  ylab("Frequency") +
+  theme_minimal()+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+# Histogram for GoodReceiptProcessingTime
+ggplot(Purchases, aes(x = GoodReceiptProcessingTime)) +
+  geom_histogram(fill = "#8FBC8F", color = "white", bins = 1) +
+  ggtitle("Distribution of Good Receipt Processing Time") +
+  xlab("Good Receipt Processing Time") +
+  ylab("Frequency") +
+  theme_minimal()+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+# Histogram for TotalInboundLeadTime
+ggplot(Purchases, aes(x = TotalInboundLeadTime)) +
+  geom_histogram(fill = "#aea391", color = "white", bins = 2) +
+  ggtitle("Distribution of Total Inbound Lead Time") +
+  xlab("Total Inbound Lead Time") +
+  ylab("Frequency") +
+  theme_minimal()+ labs(subtitle = "Dec 2021 to Dec 2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+
+For Sales Dataset
+
+```{r}
+Sales <- merge(Sales, Plants, by = "PlantKey", all=FALSE)
+Sales <- merge(Sales, Customers, by = "CustomerKey", all=FALSE)
+Sales <- merge(Sales, Materials, by = "MaterialKey", all=FALSE)
+
+library(dplyr)
+
+top_customers <- Sales %>%
+  group_by(CustomerName) %>%
+  summarize(SalesCount = n()) %>%
+  arrange(desc(SalesCount)) %>%
+  head(10)
+
+top_customers
+
+sales_counts <- Sales %>%
+  group_by(SalesDocType) %>%
+  summarize(Count = n_distinct(SalesOrder))
+
+# Plotting
+ggplot(sales_counts, aes(x = SalesDocType, y = Count)) +
+  geom_bar(stat = "identity", fill = "#aea391") +
+  ggtitle("SalesOrder by SalesDocType") +
+  xlab("SalesDocType") +
+  ylab("Count of Unique SalesID") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(subtitle = "Sales Jan2021 to Dec2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+sales_counts <- Sales %>%
+  group_by(HighOrderQtyFlag) %>%
+  summarize(Count = n_distinct(SalesOrder))
+
+# Plotting
+ggplot(sales_counts, aes(x = HighOrderQtyFlag, y = Count)) +
+  geom_bar(stat = "identity", fill = "#d1acaa") +
+  ggtitle("SalesOrder by High Order Qty Flag (>27)") +
+  xlab("HighOrderQtyFlag") +
+  ylab("Count of Sales Order") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Sales Jan2021 to Dec2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+sales_counts <- Sales %>%
+  group_by(CustomerCountry) %>%
+  summarize(Count = n_distinct(SalesOrder))
+
+# Plotting
+ggplot(sales_counts, aes(x = CustomerCountry, y = Count)) +
+  geom_bar(stat = "identity", fill = "#d1acaa") +
+  ggtitle("SalesOrder by Customer Country") +
+  xlab("CustomerCountry") +
+  ylab("Count of Sales Order") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Sales Jan2021 to Dec2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+
+sales_counts <- Sales %>%
+  group_by(MaterialDescription) %>%
+  summarize(Count = n_distinct(SalesOrder))
+
+# Plotting
+ggplot(sales_counts, aes(x = MaterialDescription, y = Count)) +
+  geom_bar(stat = "identity", fill = "#a96b5c") +
+  ggtitle("SalesOrder by Material ") +
+  xlab("MaterialDescription") +
+  ylab("Count of Sales Order") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Sales Jan2021 to Dec2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+sales_counts <- Sales %>%
+  group_by(`Product Category`) %>%
+  summarize(Count = n_distinct(SalesOrder))
+
+# Plotting
+ggplot(sales_counts, aes(x = `Product Category`, y = Count)) +
+  geom_bar(stat = "identity", fill = "#8FBC8F") +
+  ggtitle("SalesOrder by Product Category") +
+  xlab("`Product Category`") +
+  ylab("Count of Sales Order") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Sales Jan2021 to Dec2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+```
+
+For Forecast Data
+```{r}
+Forecast <- merge(Forecast, Plants, by = "PlantKey", all=FALSE)
+Forecast <- merge(Forecast, Materials, by = "MaterialKey", all=FALSE)
+Forecast <- merge(Forecast, BOM, by = "Material", all=FALSE)
+
+Forecast$SalesMonYear <- format(Forecast$RequestedDeliveryMonth, "%Y-%m")
+
+sum_quantity <- aggregate(Quantity ~ SalesMonYear, data = Forecast, FUN = sum)
+
+# Plotting the histogram
+ggplot(sum_quantity, aes(x = SalesMonYear, y = Quantity)) +
+  geom_line(color = "skyblue") +  # Use geom_line for a line graph
+  ggtitle("Expected Sales Quantity by Month-Year") +
+  xlab("Month-Year") +
+  ylab("Total Quantity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+sum_quantity <- aggregate(Quantity ~ MaterialDescription, data = Forecast, FUN = sum)
+
+# Plotting the histogram
+ggplot(sum_quantity, aes(x = MaterialDescription, y = Quantity)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  ggtitle("Expected Sales Quantity by Material") +
+  xlab("Material Description") +
+  ylab("Total Quantity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+#code
+```
+
+
+
+```{r}
+ggplot(Purchases, aes(x = PurchaseOrderQuantity, y = OrderFulfillmentDays)) +
+  geom_point() +
+  ggtitle("Purchase Order Quantity vs Order Fulfillment Days") +
+  xlab("Purchase Order Quantity") +
+  ylab("Order Fulfillment Days")
+```
+
+
+
+```{r}
+ggplot(Sales, aes(x = CustomerCountry, fill = MaterialDescription)) +
+  geom_bar() +
+  ggtitle("Sales by Customer Country and Material") +
+  xlab("Customer Country") +
+  ylab("Sales Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+ggplot(Sales, aes(x = PlantName, fill = MaterialDescription)) +
+  geom_bar() +
+  ggtitle("Sales by Plant and Material") +
+  xlab("Plant Name") +
+  ylab("Sales Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+new_dataset <- Inventory %>%
+  group_by(PlantKey, MaterialKey) %>%
+  summarize(TotalInventoryQty = sum(OnShelfInventoryQuantity))
+
+ggplot(new_dataset, aes(x = PlantKey, y = TotalInventoryQty, fill = factor(Material))) +
+  geom_bar(stat = "identity") +
+  ggtitle("Total Inventory Quantity by Plant and Material") +
+  xlab("Plant Name") +
+  ylab("Total Inventory Quantity") +
+  scale_fill_manual(values = c("1" = "EV Car Battery", "2" = "Home Battery")) +
+  labs(fill = "Material") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+
+Inventory2 <- merge(Inventory, Plants, by = "PlantKey", all=FALSE)
+Inventory2 <- merge(Inventory2, Materials, by = "MaterialKey", all=FALSE)
+
+new_dataset <- Inventory2 %>%
+  group_by(PlantName, MaterialDescription) %>%
+  summarize(TotalInventoryQty = sum(OnShelfInventoryQuantity))
+
+ggplot(new_dataset, aes(x = PlantName, y = TotalInventoryQty, fill = MaterialDescription)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Total Inventory Quantity by Plant and Material") +
+  xlab("Plant Name") +
+  ylab("Total Inventory Quantity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(subtitle = "Dec2021 to Jan2024") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
