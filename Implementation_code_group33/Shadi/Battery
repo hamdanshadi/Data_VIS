@@ -1,0 +1,832 @@
+<script>
+	import { onMount } from 'svelte';
+	import * as d3 from 'd3';
+	import { scaleLinear, sum, format, csv } from 'd3';
+
+	const plantLabels = {
+		'4': 'Antwerp DC',
+		'5': 'Wrocław DC',
+		'6': 'Lyon DC',
+		'7': 'Birmingham DC',
+		'8': 'Göteborg DC'
+	};
+
+	const colors = {
+		homeBattery: '#009688',
+		evCarBattery: '#fbc02d',
+		evCarBatteryLight: '#fdd835',
+		homeBatteryLight: '#4db6ac',
+		materialKey1: ['#ffe57f', '#ffd740', '#ffc400', '#ffab00'],
+		materialKey2: ['lightgreen', 'mediumseagreen', 'seagreen', 'darkgreen']
+	};
+
+	let margin = { top: 0, right: 100, bottom: 120, left: 50 };
+	let width = 200;
+	let height = 700 - margin.top - margin.bottom;
+
+	let svg, tooltip;
+	let selectedYear = null;
+	let selectedThreshold = null;
+	let plantData = {};
+	let inventoryData = [];
+	let salesData = [];
+	let filteredData = {};
+
+	async function fetchData() {
+		const [forecastData, inventory, sales] = await Promise.all([
+			d3.csv('https://raw.githubusercontent.com/JannesPeeters/suncharge/main/data/Forecast.csv'),
+			csv('https://raw.githubusercontent.com/JannesPeeters/suncharge/main/data/Inventory.csv'),
+			csv('https://raw.githubusercontent.com/JannesPeeters/suncharge/main/data/Sales.csv')
+		]);
+
+		processData(forecastData);
+		inventoryData = inventory;
+		salesData = sales;
+		processAndFilterData();
+	}
+
+	function processData(data) {
+		plantData = data.reduce((acc, d) => {
+			const year = new Date(d.RequestedDeliveryMonth).getFullYear().toString();
+			if (!acc[year]) acc[year] = {};
+			['4', '5', '6', '7', '8'].forEach((plantKey) => {
+				if (!acc[year][plantKey]) acc[year][plantKey] = {};
+				if (d.PlantKey === plantKey) {
+					acc[year][plantKey][d.MaterialKey] =
+						(acc[year][plantKey][d.MaterialKey] || 0) + parseInt(d.Quantity, 10);
+				}
+			});
+			return acc;
+		}, {});
+		updateChart();
+	}
+
+	function processAndFilterData() {
+		const filterData = (data, materialKey, dateField, plantKey) =>
+			data.filter(
+				(d) =>
+					d.MaterialKey == materialKey &&
+					d[dateField] &&
+					d[dateField].startsWith(selectedYear) &&
+					d.PlantKey == plantKey
+			);
+
+		const aggregateData = (filtered) => ({
+			GrossInventoryQuantity: d3.sum(filtered, (d) => +d.GrossInventoryQuantity),
+			OnShelfInventoryQuantity: d3.sum(filtered, (d) => +d.OnShelfInventoryQuantity),
+			InTransitQuantity: d3.sum(filtered, (d) => +d.InTransitQuantity),
+			OrderQuantity: d3.sum(filtered, (d) => +d.OrderQuantity)
+		});
+
+		['4', '5', '6', '7', '8'].forEach((plantKey) => {
+			const inventoryFiltered1 = filterData(inventoryData, '1', 'SnapshotDate', plantKey);
+			const salesFiltered1 = filterData(salesData, '1', 'SalesOrderCreationDate', plantKey);
+			const inventoryFiltered2 = filterData(inventoryData, '2', 'SnapshotDate', plantKey);
+			const salesFiltered2 = filterData(salesData, '2', 'SalesOrderCreationDate', plantKey);
+
+			filteredData[plantKey] = {
+				materialKey1: {
+					...aggregateData(inventoryFiltered1),
+					OrderQuantity: d3.sum(salesFiltered1, (d) => +d.OrderQuantity)
+				},
+				materialKey2: {
+					...aggregateData(inventoryFiltered2),
+					OrderQuantity: d3.sum(salesFiltered2, (d) => +d.OrderQuantity)
+				}
+			};
+		});
+	}
+
+	function updateChart() {
+		if (svg) {
+			svg.selectAll('*').remove();
+			if (selectedYear === null) {
+				drawEmptyCylinders();
+				drawEmptyGauges();
+			} else {
+				['4', '5', '6', '7', '8'].forEach((plantKey, idx) => {
+					const xOffset = idx * (width + 100);
+					if (plantData[selectedYear] && plantData[selectedYear][plantKey]) {
+						drawCylinder(plantData[selectedYear][plantKey], xOffset, plantKey);
+					}
+				});
+			}
+		}
+	}
+
+	function drawEmptyCylinders() {
+		['4', '5', '6', '7', '8'].forEach((plantKey, idx) => {
+			const xOffset = idx * (width + 100);
+			drawCylinder({}, xOffset, plantKey, true);
+		});
+	}
+
+	function drawEmptyGauges() {
+		const xOffset = 0; // adjust this based on your layout
+		const cx = xOffset + width / 2;
+		const cy = height + 10;
+		svg.selectAll('.gauge').remove(); // Clear existing gauges
+		['4', '5', '6', '7', '8'].forEach((plantKey, idx) => {
+			drawGauge(svg, cx + idx * (width + 100), cy, { materialKey1: {}, materialKey2: {} });
+		});
+	}
+
+	function drawCylinder(data, xOffset, plantKey, isEmpty = false) {
+		const totalQuantity = sum(Object.values(data));
+		const fixedHeight = 300;
+		const yScale = scaleLinear().domain([0, 100]).range([fixedHeight, 0]);
+
+		const yAxis = d3
+			.axisLeft(yScale)
+			.ticks(10)
+			.tickFormat((d) => `${d}%`);
+		svg
+			.append('g')
+			.attr('class', 'y axis')
+			.call(yAxis)
+			.attr('transform', `translate(${xOffset - 5}, ${height - fixedHeight - 200})`);
+
+		let cumulativeHeight = 0;
+		let lowQuantityCount = 0;
+
+		if (isEmpty) {
+			svg
+				.append('rect')
+				.attr('x', xOffset + width / 2 - 60)
+				.attr('y', height - fixedHeight - 200)
+				.attr('width', 120)
+				.attr('height', fixedHeight)
+				.attr('fill', 'white')
+				.attr('stroke', 'black');
+
+			drawEllipses(
+				svg,
+				xOffset + width / 2,
+				height - fixedHeight - 200,
+				fixedHeight,
+				false,
+				'white'
+			);
+			drawEllipses(svg, xOffset + width / 2, height - 200, 0, false, 'white');
+		}
+
+		// Ensure ordering: homeBattery first, then evCarBattery
+		const sortedData = Object.entries(data).sort(([a], [b]) => a - b);
+
+		sortedData.forEach(([materialKey, quantity], index, array) => {
+			const proportion = (quantity / totalQuantity) * 100;
+			const fillHeight = yScale(0) - yScale(proportion);
+			const yPos = height - fixedHeight - 200 + cumulativeHeight;
+
+			if (selectedThreshold !== null && quantity < selectedThreshold) {
+				lowQuantityCount++;
+			}
+
+			const originalColor = materialKey === '1' ? colors.evCarBattery : colors.homeBattery;
+			const lightColor = materialKey === '1' ? colors.evCarBatteryLight : colors.homeBatteryLight;
+			let rect = svg
+				.append('rect')
+				.attr('x', xOffset + width / 2 - 60)
+				.attr('y', yPos)
+				.attr('width', 120)
+				.attr('height', fillHeight)
+				.attr('fill', isEmpty ? 'white' : originalColor)
+				.attr('stroke', 'black');
+
+			rect
+				.on('mouseover', function (event) {
+					if (!isEmpty) {
+						d3.select(this).style('cursor', 'pointer');
+						tooltip
+							.html(
+								`${materialKey === '1' ? 'EV Car Battery' : 'Home Battery'}: ${format('.1f')(proportion)}% (${quantity} Units)`
+							)
+							.style('visibility', 'visible')
+							.style('left', `${event.pageX + 10}px`)
+							.style('top', `${event.pageY - 20}px`);
+					}
+				})
+				.on('mouseout', function () {
+					tooltip.style('visibility', 'hidden');
+				});
+
+			if (!isEmpty && selectedThreshold !== null && quantity < selectedThreshold) {
+				addFlashingEffect(rect, originalColor, lightColor);
+			}
+
+			drawEllipses(
+				svg,
+				xOffset + width / 2,
+				yPos,
+				fillHeight,
+				index < array.length - 1,
+				isEmpty ? 'white' : originalColor
+			);
+
+			cumulativeHeight += fillHeight;
+		});
+
+		let alertColor = 'green';
+		if (selectedThreshold !== null && !isEmpty) {
+			if (lowQuantityCount === 0) {
+				alertColor = '#39ff14';
+			} else if (lowQuantityCount === 1) {
+				alertColor = '#ffbf00';
+			} else {
+				alertColor = '#ff073a';
+			}
+		}
+		addBatteryTerminal(svg, xOffset + width / 2, height - fixedHeight - 200, alertColor, isEmpty);
+
+		svg
+			.append('ellipse')
+			.attr('cx', xOffset + width / 2)
+			.attr('cy', height - 200)
+			.attr('rx', 60)
+			.attr('ry', 10)
+			.attr('fill', isEmpty ? 'white' : '#009688')
+			.attr('stroke', 'black');
+
+		svg
+			.append('ellipse')
+			.attr('cx', xOffset + width / 2)
+			.attr('cy', height - 200)
+			.attr('rx', 30)
+			.attr('ry', 5)
+			.attr('fill', isEmpty ? 'white' : '#26a69a')
+			.attr('stroke', 'black');
+
+		svg
+			.append('text')
+			.attr('x', xOffset + width / 2)
+			.attr('y', height + 120)
+			.attr('text-anchor', 'middle')
+			.text(plantLabels[plantKey])
+			.attr('fill', 'black')
+			.attr('font-size', '14px')
+			.attr('font-weight', 'bold')
+			.attr('font-family', 'Arial');
+
+		const plantData = filteredData[plantKey] || { materialKey1: {}, materialKey2: {} };
+		drawGauge(svg, xOffset + width / 2, height + 10, plantData);
+	}
+
+	function drawEllipses(svg, cx, yPos, fillHeight, hasBottom, fillColor) {
+		svg
+			.append('ellipse')
+			.attr('cx', cx)
+			.attr('cy', yPos)
+			.attr('rx', 60)
+			.attr('ry', 10)
+			.attr('fill', fillColor)
+			.attr('stroke', 'black');
+
+		if (hasBottom) {
+			svg
+				.append('ellipse')
+				.attr('cx', cx)
+				.attr('cy', yPos + fillHeight)
+				.attr('rx', 60)
+				.attr('ry', 10)
+				.attr('fill', fillColor)
+				.attr('stroke', 'black');
+		}
+	}
+
+	function addBatteryTerminal(svg, cx, yPos, alertColor, isEmpty) {
+		let rect = svg
+			.append('rect')
+			.attr('x', cx - 10)
+			.attr('y', yPos - 10)
+			.attr('width', 20)
+			.attr('height', 10)
+			.attr('fill', 'black')
+			.attr('stroke', 'black');
+
+		let ellipse = svg
+			.append('ellipse')
+			.attr('cx', cx)
+			.attr('cy', yPos - 10)
+			.attr('rx', 10)
+			.attr('ry', 5)
+			.attr('fill', '#424242')
+			.attr('stroke', 'black');
+
+		svg
+			.append('ellipse')
+			.attr('cx', cx)
+			.attr('cy', yPos - 0)
+			.attr('rx', 10)
+			.attr('ry', 5)
+			.attr('fill', 'black')
+			.attr('stroke', 'black');
+
+		if (selectedThreshold !== null && !isEmpty) {
+			ellipse
+				.transition()
+				.duration(500)
+				.attr('fill', alertColor)
+				.transition()
+				.duration(500)
+				.attr('fill', '#424242')
+				.on('end', function repeat() {
+					d3.select(this)
+						.transition()
+						.duration(500)
+						.attr('fill', alertColor)
+						.transition()
+						.duration(500)
+						.attr('fill', '#424242')
+						.on('end', repeat);
+				});
+		} else {
+			ellipse.attr('fill', '#424242');
+		}
+	}
+
+	function addFlashingEffect(element, originalColor, lightColor) {
+		element
+			.transition()
+			.duration(500)
+			.attr('fill', lightColor)
+			.transition()
+			.duration(500)
+			.attr('fill', originalColor)
+			.on('end', function repeat() {
+				d3.select(this)
+					.transition()
+					.duration(500)
+					.attr('fill', lightColor)
+					.transition()
+					.duration(500)
+					.attr('fill', originalColor)
+					.on('end', repeat);
+			});
+	}
+
+	function drawGauge(svg, cx, cy, data) {
+		const radiusOuter = 110;
+		const radiusInner = 55;
+		const min = 0;
+		const maxOuter = 250000;
+		const maxInner = 70000;
+
+		const quantities1 = [
+			{
+				value: data.materialKey1?.GrossInventoryQuantity || 0,
+				color: '#ffe57f',
+				radius: radiusOuter - 20
+			},
+			{
+				value: data.materialKey1?.OnShelfInventoryQuantity || 0,
+				color: '#ffd740',
+				radius: radiusOuter - 13
+			},
+			{
+				value: data.materialKey1?.InTransitQuantity || 0,
+				color: '#ffc400',
+				radius: radiusOuter - 8
+			},
+			{ value: data.materialKey1?.OrderQuantity || 0, color: '#ffab00', radius: radiusOuter - 1 }
+		];
+
+		const quantities2 = [
+			{
+				value: data.materialKey2?.GrossInventoryQuantity || 0,
+				color: 'lightgreen',
+				radius: radiusInner - 20
+			},
+			{
+				value: data.materialKey2?.OnShelfInventoryQuantity || 0,
+				color: 'mediumseagreen',
+				radius: radiusInner - 13
+			},
+			{
+				value: data.materialKey2?.InTransitQuantity || 0,
+				color: 'seagreen',
+				radius: radiusInner - 8
+			},
+			{ value: data.materialKey2?.OrderQuantity || 0, color: 'darkgreen', radius: radiusInner - 1 }
+		];
+
+		const value1 = data.materialKey1?.OrderQuantity || 0;
+		const value2 = data.materialKey2?.OrderQuantity || 0;
+		const percentage1 = (value1 - min) / (maxOuter - min);
+		const angle1 = percentage1 * 270;
+		const percentage2 = (value2 - min) / (maxInner - min);
+		const angle2 = percentage2 * 270;
+
+		const majorTicksOuter = 6;
+		const minorTicksOuter = 4;
+		const majorTicksInner = 5;
+		const minorTicksInner = 4;
+
+		svg.append('g').attr('class', 'gauge');
+
+		// Draw outer arcs for MaterialKey 1
+		quantities1.forEach((arcData) => {
+			if (arcData.value > 0 && (selectedYear !== '2025' || arcData.color === 'indigo')) {
+				const endAngle = (arcData.value / maxOuter) * 270 * (Math.PI / 180);
+				const arc = d3
+					.arc()
+					.innerRadius(arcData.radius - 7)
+					.outerRadius(arcData.radius)
+					.startAngle((180 * Math.PI) / 180)
+					.endAngle((180 * Math.PI) / 180 + endAngle);
+
+				svg
+					.select('.gauge')
+					.append('path')
+					.attr('d', arc)
+					.attr('transform', `translate(${cx}, ${cy}) rotate(45)`)
+					.attr('fill', arcData.color);
+			}
+		});
+
+		// Draw inner arcs for MaterialKey 2
+		quantities2.forEach((arcData) => {
+			if (arcData.value > 0 && (selectedYear !== '2021' || arcData.color !== 'darkgreen')) {
+				const endAngle = (arcData.value / maxInner) * 270 * (Math.PI / 180);
+				const arc = d3
+					.arc()
+					.innerRadius(arcData.radius - 7)
+					.outerRadius(arcData.radius)
+					.startAngle((180 * Math.PI) / 180)
+					.endAngle((180 * Math.PI) / 180 + endAngle);
+
+				svg
+					.select('.gauge')
+					.append('path')
+					.attr('d', arc)
+					.attr('transform', `translate(${cx}, ${cy}) rotate(45)`)
+					.attr('fill', arcData.color);
+			}
+		});
+
+		// Draw outer major ticks
+		for (let i = 0; i <= majorTicksOuter; i++) {
+			const tickAngle = 135 + (i * 270) / majorTicksOuter;
+			const x1 = cx + (radiusOuter + 6) * Math.cos((tickAngle * Math.PI) / 180);
+			const y1 = cy + (radiusOuter + 6) * Math.sin((tickAngle * Math.PI) / 180);
+			const x2 = cx + radiusOuter * Math.cos((tickAngle * Math.PI) / 180);
+			const y2 = cy + radiusOuter * Math.sin((tickAngle * Math.PI) / 180);
+			svg
+				.select('.gauge')
+				.append('line')
+				.attr('x1', x1)
+				.attr('y1', y1)
+				.attr('x2', x2)
+				.attr('y2', y2)
+				.attr('stroke', 'black')
+				.attr('stroke-width', 2);
+
+			// Add labels to the outer major ticks
+			svg
+				.select('.gauge')
+				.append('text')
+				.attr('x', cx + (radiusOuter + 20) * Math.cos((tickAngle * Math.PI) / 180))
+				.attr('y', cy + (radiusOuter + 20) * Math.sin((tickAngle * Math.PI) / 180))
+				.attr('text-anchor', 'middle')
+				.attr('alignment-baseline', 'middle')
+				.attr('font-size', '10px')
+				.attr('font-weight', 'bold')
+				.attr('fill', 'red')
+				.text((i * maxOuter) / (majorTicksOuter - 1) / 1000 + 'K');
+		}
+
+		// Draw outer minor ticks
+		for (let i = 0; i < majorTicksOuter; i++) {
+			for (let j = 1; j <= minorTicksOuter; j++) {
+				const tickAngle = 135 + ((i + j / (minorTicksOuter + 1)) * 270) / majorTicksOuter;
+				const x1 = cx + (radiusOuter + 2) * Math.cos((tickAngle * Math.PI) / 180);
+				const y1 = cy + (radiusOuter + 2) * Math.sin((tickAngle * Math.PI) / 180);
+				const x2 = cx + radiusOuter * Math.cos((tickAngle * Math.PI) / 180);
+				const y2 = cy + radiusOuter * Math.sin((tickAngle * Math.PI) / 180);
+				svg
+					.select('.gauge')
+					.append('line')
+					.attr('x1', x1)
+					.attr('y1', y1)
+					.attr('x2', x2)
+					.attr('y2', y2)
+					.attr('stroke', 'black')
+					.attr('stroke-width', 1);
+			}
+		}
+
+		// Draw inner major ticks
+		for (let i = 0; i <= majorTicksInner; i++) {
+			const tickAngle = 135 + (i * 270) / majorTicksInner;
+			const x1 = cx + (radiusInner + 6) * Math.cos((tickAngle * Math.PI) / 180);
+			const y1 = cy + (radiusInner + 6) * Math.sin((tickAngle * Math.PI) / 180);
+			const x2 = cx + radiusInner * Math.cos((tickAngle * Math.PI) / 180);
+			const y2 = cy + radiusInner * Math.sin((tickAngle * Math.PI) / 180);
+			svg
+				.select('.gauge')
+				.append('line')
+				.attr('x1', x1)
+				.attr('y1', y1)
+				.attr('x2', x2)
+				.attr('y2', y2)
+				.attr('stroke', 'black')
+				.attr('stroke-width', 2);
+
+			// Add labels to the inner major ticks
+			svg
+				.select('.gauge')
+				.append('text')
+				.attr('x', cx + (radiusInner + 20) * Math.cos((tickAngle * Math.PI) / 180))
+				.attr('y', cy + (radiusInner + 20) * Math.sin((tickAngle * Math.PI) / 180))
+				.attr('text-anchor', 'middle')
+				.attr('alignment-baseline', 'middle')
+				.attr('font-size', '9px')
+				.attr('font-weight', 'bold')
+				.attr('fill', 'blue')
+				.text((i * maxInner) / (majorTicksInner - 1) / 1000 + 'K');
+		}
+
+		// Draw inner minor ticks
+		for (let i = 0; i < majorTicksInner; i++) {
+			for (let j = 1; j <= minorTicksInner; j++) {
+				const tickAngle = 135 + ((i + j / (minorTicksInner + 1)) * 270) / majorTicksInner;
+				const x1 = cx + (radiusInner + 2) * Math.cos((tickAngle * Math.PI) / 180);
+				const y1 = cy + (radiusInner + 2) * Math.sin((tickAngle * Math.PI) / 180);
+				const x2 = cx + radiusInner * Math.cos((tickAngle * Math.PI) / 180);
+				const y2 = cy + radiusInner * Math.sin((tickAngle * Math.PI) / 180);
+				svg
+					.select('.gauge')
+					.append('line')
+					.attr('x1', x1)
+					.attr('y1', y1)
+					.attr('x2', x2)
+					.attr('y2', y2)
+					.attr('stroke', 'black')
+					.attr('stroke-width', 1);
+			}
+		}
+
+		// Draw outer needle for Order Quantity of MaterialKey 1
+		if (selectedYear !== '2021') {
+			svg
+				.select('.gauge')
+				.append('line')
+				.attr('x1', cx)
+				.attr('y1', cy)
+				.attr('x2', cx + 110 * Math.cos(((angle1 + 135) * Math.PI) / 180))
+				.attr('y2', cy + 110 * Math.sin(((angle1 + 135) * Math.PI) / 180))
+				.attr('stroke', 'red')
+				.attr('stroke-width', 2);
+		}
+
+		// Draw inner needle for Order Quantity of MaterialKey 2
+		if (selectedYear !== '2021') {
+			svg
+				.select('.gauge')
+				.append('line')
+				.attr('x1', cx)
+				.attr('y1', cy)
+				.attr('x2', cx + 55 * Math.cos(((angle2 + 135) * Math.PI) / 180))
+				.attr('y2', cy + 55 * Math.sin(((angle2 + 135) * Math.PI) / 180))
+				.attr('stroke', 'blue')
+				.attr('stroke-width', 2);
+		}
+
+		// Draw center point for the needles
+		svg
+			.select('.gauge')
+			.append('circle')
+			.attr('cx', cx)
+			.attr('cy', cy)
+			.attr('r', 4)
+			.attr('fill', 'red');
+	}
+
+	onMount(() => {
+		svg = d3
+			.select('#chart')
+			.append('svg')
+			.attr('width', 5 * (width + 100) + margin.left + margin.right)
+			.attr('height', height + margin.top + margin.bottom)
+			.append('g')
+			.attr('transform', `translate(${margin.left}, ${margin.top})`);
+
+		tooltip = d3
+			.select('body')
+			.append('div')
+			.attr('class', 'tooltip')
+			.style('position', 'absolute')
+			.style('visibility', 'hidden')
+			.style('background-color', 'white')
+			.style('border', '1px solid #ccc')
+			.style('padding', '5px')
+			.style('text-align', 'center');
+
+		fetchData();
+	});
+
+	$: {
+		if (selectedYear !== null || selectedThreshold !== null) {
+			processAndFilterData();
+			updateChart();
+		} else {
+			updateChart();
+		}
+	}
+</script>
+
+<div class="header">
+	<div class="company-icon">
+		<div class="icon-circle">SunCharge</div>
+		<h1>Distribution Centers Performance Monitoring Tool</h1>
+	</div>
+</div>
+
+<div class="chart-container">
+	<div id="chart"></div>
+	{#if selectedYear}
+		<div class="legend">
+			<div class="legend-title">Battery Forecast Quantity</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: #fbc02d;"></div>
+				EV Car Battery
+			</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: #009688;"></div>
+				Home Battery
+			</div>
+			<div class="legend-title">Gauge Sales Quantity</div>
+			<div class="legend-title" style="font-size: 12px;">EV Car Battery</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: #ffe57f;"></div>
+				Gross Inventory Quantity
+			</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: #ffd740;"></div>
+				On Shelf Inventory Quantity
+			</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: #ffc400;"></div>
+				In Transit Quantity
+			</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: #ffab00;"></div>
+				Order Quantity
+			</div>
+			<div class="legend-title" style="font-size: 12px;">Home Battery</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: lightgreen;"></div>
+				Gross Inventory Quantity
+			</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: mediumseagreen;"></div>
+				On Shelf Inventory Quantity
+			</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: seagreen;"></div>
+				In Transit Quantity
+			</div>
+			<div class="legend-item">
+				<div class="legend-color" style="background-color: darkgreen;"></div>
+				Order Quantity
+			</div>
+		</div>
+	{/if}
+</div>
+
+<div class="controls">
+	<div class="dropdown">
+		<label for="year-select">Year:</label>
+		<select id="year-select" bind:value={selectedYear}>
+			<option value={null} selected>Select Year</option>
+			<option value="2022">2022</option>
+			<option value="2023">2023</option>
+			<option value="2024">2024</option>
+			<option value="2025">2025</option>
+		</select>
+	</div>
+	<div class="dropdown">
+		<label for="threshold-select">Alert Threshold:</label>
+		<select id="threshold-select" bind:value={selectedThreshold}>
+			<option value={null}>Select Quantity Threshold</option>
+			<option value="1000">1,000 Units</option>
+			<option value="5000">5,000 Units</option>
+			<option value="10000">10,000 Units</option>
+			<option value="100000">100,000+ Units</option>
+		</select>
+	</div>
+</div>
+
+<style>
+	.header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 20px;
+	}
+
+	.company-icon {
+		display: flex;
+		align-items: center;
+	}
+
+	.icon-circle {
+		background-color: #f57c00;
+		color: white;
+		font-family: Arial, sans-serif;
+		font-size: 24px;
+		font-weight: bold;
+		border-radius: 50%;
+		padding: 10px 20px;
+		margin-right: 10px;
+	}
+
+	h1 {
+		flex: 1;
+		text-align: center;
+		font-family: Arial, sans-serif;
+	}
+
+	.chart-container {
+		margin: auto;
+		width: 1800px;
+		height: 800px;
+		padding: 10px;
+		border: 2px dotted red;
+		position: relative;
+	}
+
+	.controls {
+		display: flex;
+		justify-content: space-around;
+		align-items: center;
+		background-color: #ffe0b2;
+		padding: 20px;
+		border-radius: 8px;
+		box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+		margin-top: 20px;
+	}
+
+	.dropdown {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		margin: 0 20px;
+	}
+
+	.dropdown label {
+		font-family: Arial, sans-serif;
+		color: black;
+		padding: 5px 10px;
+	}
+
+	.dropdown select {
+		padding: 10px;
+		border-radius: 5px;
+		border: 2px solid black;
+		background-color: #f57c00;
+		color: white;
+		font-family: Arial, sans-serif;
+		font-weight: bold;
+	}
+
+	.chart-container .tooltip {
+		position: absolute;
+		visibility: visible; /* Temporarily set to visible for testing */
+		background-color: yellow; /* Change this to the desired background color */
+		border: 1px solid #ccc;
+		padding: 5px;
+		text-align: center;
+		font-size: 16px; /* Change this to the desired font size */
+	}
+
+	.legend {
+		position: absolute;
+		top: 200px;
+		right: 80px;
+		background-color: #fff;
+		padding: 5px;
+		border: 1px solid #ccc;
+		border-radius: 5px;
+		box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+		z-index: 10; /* Ensure the legend is displayed above other elements */
+	}
+
+	.legend-title {
+		font-size: 16px;
+		font-weight: bold;
+		margin-bottom: 5px;
+	}
+
+	.legend-item {
+		display: flex;
+		align-items: center;
+		margin-bottom: 5px;
+		font-size: 12px; /* This sets the font size for the legend items */
+	}
+
+	.legend-color {
+		width: 10px;
+		height: 10px;
+		margin-right: 5px;
+	}
+</style>
